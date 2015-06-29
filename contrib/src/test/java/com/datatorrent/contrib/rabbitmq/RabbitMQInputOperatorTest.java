@@ -31,11 +31,10 @@ import org.slf4j.LoggerFactory;
 
 import com.datatorrent.contrib.helper.CollectorModule;
 import com.datatorrent.contrib.helper.MessageQueueTestHelper;
-
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
 import com.datatorrent.api.LocalMode;
-
+import com.datatorrent.lib.io.IdempotentStorageManager;
 import com.datatorrent.netlet.util.DTThrowable;
 
 /**
@@ -124,6 +123,8 @@ public class RabbitMQInputOperatorTest
     LocalMode lma = LocalMode.newInstance();
     DAG dag = lma.getDAG();
     RabbitMQInputOperator consumer = dag.addOperator("Consumer", RabbitMQInputOperator.class);
+    consumer.setIdempotentStorageManager(new IdempotentStorageManager.FSIdempotentStorageManager());
+
     final CollectorModule<byte[]> collector = dag.addOperator("Collector", new CollectorModule<byte[]>());
 
     consumer.setHost("localhost");
