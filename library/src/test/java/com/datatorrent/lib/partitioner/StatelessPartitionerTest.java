@@ -23,16 +23,15 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.google.common.collect.Lists;
-
 import com.datatorrent.api.Context.OperatorContext;
 import com.datatorrent.api.*;
 import com.datatorrent.api.Operator.InputPort;
 import com.datatorrent.api.Partitioner.Partition;
 import com.datatorrent.api.StringCodec.Object2String;
 import com.datatorrent.api.annotation.ApplicationAnnotation;
-
 import com.datatorrent.lib.stream.DevNull;
 import com.datatorrent.lib.util.TestUtils;
+import com.datatorrent.stram.engine.TestGeneratorInputOperator;
 
 public class StatelessPartitionerTest
 {
@@ -48,7 +47,7 @@ public class StatelessPartitionerTest
     }
   }
 
-  public static class DummyOperator implements Operator
+  public static class DummyOperator implements Operator, InputOperator
   {
     public final DefaultOutputPort<Integer> output = new DefaultOutputPort<Integer>();
 
@@ -95,6 +94,12 @@ public class StatelessPartitionerTest
     public int getValue()
     {
       return value;
+    }
+
+    @Override
+    public void emitTuples() {
+      // Do Nothing
+      // Added to avoid validation failure for root operator not being input operator 
     }
   }
 
