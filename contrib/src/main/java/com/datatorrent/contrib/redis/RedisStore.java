@@ -22,7 +22,10 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.ScanParams;
+import redis.clients.jedis.ScanResult;
 import redis.clients.jedis.Transaction;
 
 import com.datatorrent.lib.db.TransactionableKeyValueStore;
@@ -178,8 +181,36 @@ public class RedisStore implements TransactionableKeyValueStore
     if (isInTransaction()) {
       throw new RuntimeException("Cannot call get when in redis transaction");
     }
-    return jedis.get(key.toString());
+    try {
+      return jedis.get(key.toString());
+    }
+    catch (Exception e){
+      LOG.debug("Retriving key = {} as string failed", key.toString());
+    }
+    return null;
   }
+
+
+  /**
+   * Gets the stored Map for given the key, when the value data type is a map, stored with hmset  
+   *
+   * @param key
+   * @return hashmap stored for the key.
+   */
+  public Map<String, String> getMap(Object key)
+  {
+    if (isInTransaction()) {
+      throw new RuntimeException("Cannot call get when in redis transaction");
+    }
+    try {
+      return jedis.hgetAll(key.toString());
+    }
+    catch (Exception e){
+      LOG.debug("Retriving key = {} as map failed", key.toString());
+    }
+    return null;
+  }
+
 
   /**
    * Gets all the values given the keys.
@@ -197,7 +228,7 @@ public class RedisStore implements TransactionableKeyValueStore
     }
     return (List<Object>) (List<?>) jedis.mget(keys.toArray(new String[]{}));
   }
-
+  
   @SuppressWarnings({"unchecked", "rawtypes"})
   @Override
   public void put(Object key, Object value)
@@ -253,6 +284,11 @@ public class RedisStore implements TransactionableKeyValueStore
     else {
       jedis.del(key.toString());
     }
+  }
+
+  public ScanResult<String> ScanKeys(String offset, ScanParams params)
+  {
+    return jedis.scan(offset, params);
   }
 
   /**
