@@ -16,10 +16,17 @@
 package com.datatorrent.contrib.rabbitmq;
 
 import com.datatorrent.api.*;
-import com.datatorrent.api.InputOperator;
 import com.datatorrent.api.Context.OperatorContext;
+import com.datatorrent.lib.io.IdempotentStorageManager;
+import com.datatorrent.lib.util.KeyValPair;
+import com.datatorrent.netlet.util.DTThrowable;
 import com.rabbitmq.client.*;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import javax.validation.constraints.NotNull;
 import org.slf4j.Logger;
@@ -61,9 +68,7 @@ import org.slf4j.LoggerFactory;
  *
  * @since 0.3.2
  */
-public abstract class AbstractRabbitMQInputOperator<T>
-    implements InputOperator,
-Operator.ActivationListener<OperatorContext>
+public abstract class AbstractRabbitMQInputOperator<T> implements InputOperator, Operator.ActivationListener<OperatorContext>, Operator.CheckpointListener
 {
   private static final Logger logger = LoggerFactory.getLogger(AbstractRabbitMQInputOperator.class);
   @NotNull
@@ -74,12 +79,13 @@ Operator.ActivationListener<OperatorContext>
   @NotNull
   protected String exchangeType;
   protected String routingKey = "";
-  protected String queueName; // Has to be supplied by client when exchangeType is not "fanout"
+  protected String queueName; // Has to be supplied by client when exchangeType
+                              // is not "fanout"
   protected transient ConnectionFactory connFactory;
-//  QueueingConsumer consumer = null;
+  // QueueingConsumer consumer = null;
 
   private static final int DEFAULT_BLAST_SIZE = 1000;
-  private static final int DEFAULT_BUFFER_SIZE = 1024*1024;
+  private static final int DEFAULT_BUFFER_SIZE = 1024 * 1024;
   private int tuple_blast = DEFAULT_BLAST_SIZE;
   protected int bufferSize = DEFAULT_BUFFER_SIZE;
 
@@ -87,13 +93,28 @@ Operator.ActivationListener<OperatorContext>
   protected transient Channel channel;
   protected transient TracingConsumer tracingConsumer;
   protected transient String cTag;
-  protected transient ArrayBlockingQueue<byte[]> holdingBuffer;
 
-/**
- * define a consumer which can asynchronously receive data,
- * and added to holdingBuffer
- */
- public class TracingConsumer extends DefaultConsumer
+  protected transient ArrayBlockingQueue<KeyValPair<Long, byte[]>> holdingBuffer;
+  private IdempotentStorageManager idempotentStorageManager;
+  protected final transient Map<Long, byte[]> currentWindowRecoveryState;
+  private transient final Set<Long> pendingAck;
+  private transient final Set<Long> recoveredTags;
+  private transient long currentWindowId;
+  private transient int operatorContextId;
+
+  public AbstractRabbitMQInputOperator()
+  {
+    currentWindowRecoveryState = new HashMap<Long, byte[]>();
+    pendingAck = new HashSet<Long>();
+    recoveredTags = new HashSet<Long>();
+    idempotentStorageManager = new IdempotentStorageManager.NoopIdempotentStorageManager();
+  }
+
+  /**
+   * define a consumer which can asynchronously receive data, and added to
+   * holdingBuffer
+   */
+  public class TracingConsumer extends DefaultConsumer
   {
     public TracingConsumer(Channel ch)
     {
@@ -124,8 +145,19 @@ Operator.ActivationListener<OperatorContext>
     @Override
     public void handleDelivery(String consumer_Tag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException
     {
-      holdingBuffer.add(body);
-//      logger.debug("Received Async message:" + new String(body)+" buffersize:"+holdingBuffer.size());
+      long tag = envelope.getDeliveryTag();
+      if (envelope.isRedeliver() && (recoveredTags.contains(tag) || pendingAck.contains(tag))) {
+        if (recoveredTags.contains(tag)) {
+          pendingAck.add(tag);
+        }
+        return;
+      }
+
+      // Acknowledgements are sent at the end of the window after adding to
+      // idempotency manager
+      pendingAck.add(tag);
+      holdingBuffer.add(new KeyValPair<Long, byte[]>(tag, body));
+      logger.debug("Received Async message: {}  buffersize: {} ", new String(body), holdingBuffer.size());
     }
   }
 
@@ -137,7 +169,9 @@ Operator.ActivationListener<OperatorContext>
       ntuples = holdingBuffer.size();
     }
     for (int i = ntuples; i-- > 0;) {
-      emitTuple(holdingBuffer.poll());
+      KeyValPair<Long, byte[]> message = holdingBuffer.poll();
+      currentWindowRecoveryState.put(message.getKey(), message.getValue());
+      emitTuple(message.getValue());
     }
   }
 
@@ -146,22 +180,73 @@ Operator.ActivationListener<OperatorContext>
   @Override
   public void beginWindow(long windowId)
   {
+    currentWindowId = windowId;
+    if (windowId <= this.idempotentStorageManager.getLargestRecoveryWindow()) {
+      replay(windowId);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private void replay(long windowId)
+  {
+    Map<Long, byte[]> recoveredData;
+    try {
+      recoveredData = (Map<Long, byte[]>) this.idempotentStorageManager.load(operatorContextId, windowId);
+      if (recoveredData == null) {
+        return;
+      }
+      for (Entry<Long, byte[]> recoveredEntry : recoveredData.entrySet()) {
+        recoveredTags.add(recoveredEntry.getKey());
+        emitTuple(recoveredEntry.getValue());
+      }
+    } catch (IOException e) {
+      DTThrowable.rethrow(e);
+    }
   }
 
   @Override
   public void endWindow()
   {
+    // No more messages can be consumed now. so we will call emit tuples once
+    // more
+    // so that any pending messages can be emitted.
+    KeyValPair<Long, byte[]> message;
+    while ((message = holdingBuffer.poll()) != null) {
+      currentWindowRecoveryState.put(message.getKey(), message.getValue());
+      emitTuple(message.getValue());
+    }
+
+    try {
+      this.idempotentStorageManager.save(currentWindowRecoveryState, operatorContextId, currentWindowId);
+    } catch (IOException e) {
+      DTThrowable.rethrow(e);
+    }
+
+    currentWindowRecoveryState.clear();
+
+    for (Long deliveryTag : pendingAck) {
+      try {
+        channel.basicAck(deliveryTag, false);
+      } catch (IOException e) {
+        DTThrowable.rethrow(e);
+      }
+    }
+
+    pendingAck.clear();
   }
 
   @Override
   public void setup(OperatorContext context)
   {
-    holdingBuffer = new ArrayBlockingQueue<byte[]>(bufferSize);
+    this.operatorContextId = context.getId();
+    holdingBuffer = new ArrayBlockingQueue<KeyValPair<Long, byte[]>>(bufferSize);
+    this.idempotentStorageManager.setup(context);
   }
 
   @Override
   public void teardown()
   {
+    this.idempotentStorageManager.teardown();
   }
 
   @Override
@@ -170,7 +255,7 @@ Operator.ActivationListener<OperatorContext>
     try {
       connFactory = new ConnectionFactory();
       connFactory.setHost(host);
-      if (port != 0){
+      if (port != 0) {
         connFactory.setPort(port);
       }
 
@@ -178,10 +263,12 @@ Operator.ActivationListener<OperatorContext>
       channel = connection.createChannel();
 
       channel.exchangeDeclare(exchange, exchangeType);
-      if (queueName == null){
+      boolean resetQueueName = false;
+      if (queueName == null) {
         // unique queuename is generated
         // used in case of fanout exchange
         queueName = channel.queueDeclare().getQueue();
+        resetQueueName = true;
       } else {
         // user supplied name
         // used in case of direct exchange
@@ -190,12 +277,14 @@ Operator.ActivationListener<OperatorContext>
 
       channel.queueBind(queueName, exchange, routingKey);
 
-//      consumer = new QueueingConsumer(channel);
-//      channel.basicConsume(queueName, true, consumer);
+      // consumer = new QueueingConsumer(channel);
+      // channel.basicConsume(queueName, true, consumer);
       tracingConsumer = new TracingConsumer(channel);
-      cTag = channel.basicConsume(queueName, true, tracingConsumer);
-    }
-    catch (IOException ex) {
+      cTag = channel.basicConsume(queueName, false, tracingConsumer);
+      if (resetQueueName) {
+        queueName = null;
+      }
+    } catch (IOException ex) {
       throw new RuntimeException("Connection Failure", ex);
     }
   }
@@ -206,11 +295,26 @@ Operator.ActivationListener<OperatorContext>
     try {
       channel.close();
       connection.close();
-    }
-    catch (IOException ex) {
+    } catch (IOException ex) {
       logger.debug(ex.toString());
     }
   }
+
+  @Override
+  public void checkpointed(long windowId)
+  {
+  }
+
+  @Override
+  public void committed(long windowId)
+  {
+    try {
+      idempotentStorageManager.deleteUpTo(operatorContextId, windowId);
+    } catch (IOException e) {
+      throw new RuntimeException("committing", e);
+    }
+  }
+
   public void setTupleBlast(int i)
   {
     this.tuple_blast = i;
@@ -274,6 +378,16 @@ Operator.ActivationListener<OperatorContext>
   public void setRoutingKey(String routingKey)
   {
     this.routingKey = routingKey;
+  }
+
+  public IdempotentStorageManager getIdempotentStorageManager()
+  {
+    return idempotentStorageManager;
+  }
+
+  public void setIdempotentStorageManager(IdempotentStorageManager idempotentStorageManager)
+  {
+    this.idempotentStorageManager = idempotentStorageManager;
   }
 
 }

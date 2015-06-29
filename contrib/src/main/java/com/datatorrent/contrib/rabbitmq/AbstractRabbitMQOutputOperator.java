@@ -16,6 +16,8 @@
 package com.datatorrent.contrib.rabbitmq;
 
 import com.datatorrent.common.util.BaseOperator;
+import com.datatorrent.lib.io.IdempotentStorageManager;
+import com.datatorrent.netlet.util.DTThrowable;
 import com.datatorrent.api.Context.OperatorContext;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -65,39 +67,95 @@ public class AbstractRabbitMQOutputOperator extends BaseOperator
   transient Connection connection = null;
   transient Channel channel = null;
   transient String exchange = "testEx";
-  transient String queueName="testQ";
+  transient String queueName = "testQ";
+
+  private IdempotentStorageManager idempotentStorageManager;
+  private transient long currentWindowId;
+  private transient long largestRecoveryWindowId;
+  private transient int operatorContextId;
+  protected transient boolean skipProcessingTuple = false;
+  private transient OperatorContext context;
 
   @Override
   public void setup(OperatorContext context)
   {
+    // Needed to setup idempotency storage manager in setter
+    this.context = context;
+    this.operatorContextId = context.getId();
+
     try {
       connFactory.setHost("localhost");
       connection = connFactory.newConnection();
       channel = connection.createChannel();
       channel.exchangeDeclare(exchange, "fanout");
-//      channel.queueDeclare(queueName, false, false, false, null);
-    }
-    catch (IOException ex) {
+
+      this.idempotentStorageManager.setup(context);
+
+    } catch (IOException ex) {
       logger.debug(ex.toString());
+      DTThrowable.rethrow(ex);
     }
   }
 
-  public void setQueueName(String queueName) {
+  @Override
+  public void beginWindow(long windowId)
+  {
+    currentWindowId = windowId;
+    largestRecoveryWindowId = idempotentStorageManager.getLargestRecoveryWindow();
+    if (windowId <= largestRecoveryWindowId) {
+      // Do not resend already sent tuples
+      skipProcessingTuple = true;
+    } else {
+      skipProcessingTuple = false;
+    }
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void endWindow()
+  {
+    if (currentWindowId < largestRecoveryWindowId) {
+      // ignore
+      return;
+    }
+    try {
+      idempotentStorageManager.save("processedWindow", operatorContextId, currentWindowId);
+    } catch (IOException e) {
+      DTThrowable.rethrow(e);
+    }
+  }
+
+  public void setQueueName(String queueName)
+  {
     this.queueName = queueName;
   }
 
-  public void setExchange(String exchange) {
+  public void setExchange(String exchange)
+  {
     this.exchange = exchange;
   }
+
   @Override
   public void teardown()
   {
     try {
       channel.close();
       connection.close();
-    }
-    catch (IOException ex) {
+      this.idempotentStorageManager.teardown();
+    } catch (IOException ex) {
       logger.debug(ex.toString());
     }
+  }
+
+  public IdempotentStorageManager getIdempotentStorageManager()
+  {
+    return idempotentStorageManager;
+  }
+
+  public void setIdempotentStorageManager(IdempotentStorageManager idempotentStorageManager)
+  {
+    this.idempotentStorageManager = idempotentStorageManager;
   }
 }
