@@ -21,8 +21,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import com.datatorrent.contrib.common.FieldInfo;
-import com.datatorrent.contrib.common.FieldInfo.SupportType;
+import com.datatorrent.lib.util.FieldInfo;
+import com.datatorrent.lib.util.FieldInfo.SupportType;
 import com.datatorrent.lib.util.KeyValPair;
 import com.datatorrent.lib.util.PojoUtils;
 import com.datatorrent.lib.util.PojoUtils.Getter;
@@ -92,7 +92,7 @@ public class RedisPOJOOutputOperator extends AbstractRedisAggregateOutputOperato
     final int size = dataColumns.size();
     for (int i = 0; i < size; i++) {
       final SupportType type = dataColumns.get(i).getType();
-      final String getterExpression = dataColumns.get(i).getColumnExpression();
+      final String getterExpression = dataColumns.get(i).getPojoFieldExpression();
       final Object getter;
       switch (type) {
       case STRING:          

@@ -20,8 +20,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.datatorrent.api.Context.OperatorContext;
-import com.datatorrent.contrib.common.FieldInfo;
-import com.datatorrent.contrib.common.FieldInfo.SupportType;
+import com.datatorrent.lib.util.FieldInfo;
+import com.datatorrent.lib.util.FieldInfo.SupportType;
 import com.datatorrent.lib.util.KeyValPair;
 import com.datatorrent.lib.util.PojoUtils;
 import com.datatorrent.lib.util.PojoUtils.Setter;
@@ -46,8 +46,7 @@ import com.datatorrent.netlet.util.DTThrowable;
  * @tags output operator, key value
  *
  */
-public class RedisPOJOInputOperator extends
-    AbstractRedisInputOperator<KeyValPair<String, Object>> {
+public class RedisPOJOInputOperator extends AbstractRedisInputOperator<KeyValPair<String, Object>> {
 
   protected final Map<String, Object> map = new HashMap<String, Object>();
   private ArrayList<FieldInfo> dataColumns;
@@ -126,7 +125,7 @@ public class RedisPOJOInputOperator extends
     final int size = dataColumns.size();
     for (int i = 0; i < size; i++) {
       final SupportType type = dataColumns.get(i).getType();
-      final String getterExpression = dataColumns.get(i).getColumnExpression();
+      final String getterExpression = dataColumns.get(i).getPojoFieldExpression();
       final Object setter;
       switch (type) {
       case STRING:

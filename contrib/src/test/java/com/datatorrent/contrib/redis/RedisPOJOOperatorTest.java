@@ -30,10 +30,10 @@ import com.datatorrent.api.DAG;
 import com.datatorrent.api.DefaultInputPort;
 import com.datatorrent.api.LocalMode;
 import com.datatorrent.common.util.BaseOperator;
-import com.datatorrent.contrib.common.FieldInfo;
-import com.datatorrent.contrib.common.FieldInfo.SupportType;
 import com.datatorrent.contrib.redis.RedisInputOperatorTest.CollectorModule;
 import com.datatorrent.lib.helper.OperatorContextTestHelper;
+import com.datatorrent.lib.util.FieldInfo;
+import com.datatorrent.lib.util.FieldInfo.SupportType;
 import com.datatorrent.lib.util.KeyValPair;
 
 public class RedisPOJOOperatorTest {
