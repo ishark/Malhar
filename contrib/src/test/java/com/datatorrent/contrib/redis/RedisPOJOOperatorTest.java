@@ -143,7 +143,7 @@ public class RedisPOJOOperatorTest {
     testStore.connect();
     String offset = "0";
     ScanParams params =  new ScanParams();
-    params.count(1);
+    params.count(100);
 
     Map<String, String> value = new HashMap<String, String>();
     value.put("Column1", "abc");
@@ -187,7 +187,7 @@ public class RedisPOJOOperatorTest {
         @Override
         public void run() {
           long startTms = System.currentTimeMillis();
-          long timeout = 1000000L;
+          long timeout = 10000L;
           try {
             Thread.sleep(1000);
             while (System.currentTimeMillis() - startTms < timeout) {

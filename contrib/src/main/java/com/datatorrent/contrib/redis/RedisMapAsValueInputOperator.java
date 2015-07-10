@@ -34,11 +34,11 @@ public class RedisMapAsValueInputOperator extends AbstractRedisInputOperator<Key
   public void processTuples()
   {
     for (String key : keys) {
-      Map<String, String> mapValue = store.getMap(key);    
-      if(mapValue != null) {
+      if (store.getType(key).equals("hash")) {
+        Map<String, String> mapValue = store.getMap(key);
         outputPort.emit(new KeyValPair<String, Map<String, String>>(key, mapValue));
       }
-    }    
+    }
     
     keys.clear();
   }

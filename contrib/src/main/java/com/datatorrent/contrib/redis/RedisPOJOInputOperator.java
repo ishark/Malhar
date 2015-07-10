@@ -165,9 +165,8 @@ public class RedisPOJOInputOperator extends
   @Override
   public void processTuples() {
     for (String key : keys) {
-      Map<String, String> mapValue = store.getMap(key);
-      if (mapValue != null) {
-
+      if (store.getType(key).equals("hash")) {
+        Map<String, String> mapValue = store.getMap(key);
         if (isFirstTuple) {
           try {
             processFirstTuple(mapValue);

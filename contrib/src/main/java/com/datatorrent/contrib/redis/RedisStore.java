@@ -181,15 +181,13 @@ public class RedisStore implements TransactionableKeyValueStore
     if (isInTransaction()) {
       throw new RuntimeException("Cannot call get when in redis transaction");
     }
-    try {
-      return jedis.get(key.toString());
-    }
-    catch (Exception e){
-      LOG.debug("Retriving key = {} as string failed", key.toString());
-    }
-    return null;
+    return jedis.get(key.toString());
   }
 
+  public String getType(String key)
+  {
+    return jedis.type(key);
+  }
 
   /**
    * Gets the stored Map for given the key, when the value data type is a map, stored with hmset  
@@ -202,13 +200,7 @@ public class RedisStore implements TransactionableKeyValueStore
     if (isInTransaction()) {
       throw new RuntimeException("Cannot call get when in redis transaction");
     }
-    try {
-      return jedis.hgetAll(key.toString());
-    }
-    catch (Exception e){
-      LOG.debug("Retriving key = {} as map failed", key.toString());
-    }
-    return null;
+    return jedis.hgetAll(key.toString());
   }
 
 

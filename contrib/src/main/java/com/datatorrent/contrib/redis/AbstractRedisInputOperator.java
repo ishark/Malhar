@@ -24,6 +24,7 @@ import javax.validation.constraints.NotNull;
 import redis.clients.jedis.ScanParams;
 import redis.clients.jedis.ScanResult;
 
+import com.datatorrent.api.Operator.CheckpointListener;
 import com.datatorrent.api.Context.OperatorContext;
 import com.datatorrent.netlet.util.DTThrowable;
 import com.datatorrent.lib.db.AbstractStoreInputOperator;
@@ -43,19 +44,19 @@ import com.datatorrent.lib.io.IdempotentStorageManager;
  * @since 0.9.3
  */
 public abstract class AbstractRedisInputOperator<T> extends
-    AbstractStoreInputOperator<T, RedisStore> {
-  protected List<String> keys = new ArrayList<String>();
-  protected String scanOffset;
-  protected ScanParams scanParameters;
-  private Integer backupOffset;
-  private Integer recoveryOffset;
-  private int scanCount;
+    AbstractStoreInputOperator<T, RedisStore> implements CheckpointListener {
+  protected transient List<String> keys = new ArrayList<String>();
+  protected transient String scanOffset;
+  protected transient ScanParams scanParameters;
+  private transient boolean scanComplete;
+  private transient Integer recoveryOffset, backupOffset;
+  private transient int scanCount;
 
   @NotNull
   protected IdempotentStorageManager idempotentStorageManager;
 
-  private OperatorContext context;
-  private long currentWindowId;
+  private transient OperatorContext context;
+  private transient long currentWindowId;
 
   public AbstractRedisInputOperator() {
     scanCount = 2;
@@ -65,7 +66,7 @@ public abstract class AbstractRedisInputOperator<T> extends
   @Override
   public void beginWindow(long windowId) {
     currentWindowId = windowId;
-    if (currentWindowId < idempotentStorageManager.getLargestRecoveryWindow()) {
+    if (currentWindowId <= idempotentStorageManager.getLargestRecoveryWindow()) {
       try {
         Integer recoveredOffset = (Integer) idempotentStorageManager.load(
             context.getId(), windowId);
@@ -76,27 +77,28 @@ public abstract class AbstractRedisInputOperator<T> extends
         DTThrowable.rethrow(e);
       }
     }
+    
+    recoveryOffset = backupOffset;
     scanKeysFromOffset();
   }
 
   private void scanKeysFromOffset() {
-    if (backupOffset != 0) {
-
+    if (!scanComplete) {
       ScanResult<String> result = store.ScanKeys(scanOffset, scanParameters);
-      recoveryOffset = Integer.parseInt(scanOffset);
-
-      scanOffset = result.getStringCursor();
       backupOffset = Integer.parseInt(scanOffset);
-
+      scanOffset = result.getStringCursor();
+      if(scanOffset.equalsIgnoreCase("0"))
+      {
+        scanComplete = true;
+      }
       if (result.getStringCursor().equals("0")) {
         // Redis store returns 0 after all data is read,
         // point scanOffset to the end in this case for reading any new tuples
-        Integer endOffset = recoveryOffset + result.getResult().size();
+        Integer endOffset = backupOffset + result.getResult().size();
         scanOffset = endOffset.toString();
       }
 
       keys = result.getResult();
-
     }
   }
 
@@ -106,7 +108,7 @@ public abstract class AbstractRedisInputOperator<T> extends
     idempotentStorageManager.setup(context);
     this.context = context;
     scanOffset = "0";
-    backupOffset = -1;
+    scanComplete = false;
     scanParameters = new ScanParams();
     scanParameters.count(scanCount);
   }
@@ -146,4 +148,20 @@ public abstract class AbstractRedisInputOperator<T> extends
   }
 
   abstract public void processTuples();
+
+  @Override
+  public void checkpointed(long windowId)
+  {
+  }
+
+  @Override
+  public void committed(long windowId)
+  {
+    try {
+      idempotentStorageManager.deleteUpTo(context.getId(), windowId);
+    }
+    catch (IOException e) {
+      throw new RuntimeException("committing", e);
+    }
+  }
 }
