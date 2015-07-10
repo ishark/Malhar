@@ -71,9 +71,9 @@ import org.slf4j.LoggerFactory;
  *
  * @since 0.3.2
  */
-public abstract class AbstractRabbitMQInputOperator<T>
-    implements InputOperator,
-Operator.ActivationListener<OperatorContext>
+public abstract class AbstractRabbitMQInputOperator<T> implements
+    InputOperator, Operator.ActivationListener<OperatorContext>,
+    Operator.CheckpointListener
 {
   private static final Logger logger = LoggerFactory.getLogger(AbstractRabbitMQInputOperator.class);
   @NotNull
@@ -294,6 +294,23 @@ Operator.ActivationListener<OperatorContext>
       logger.debug(ex.toString());
     }
   }
+
+  @Override
+  public void checkpointed(long windowId)
+  {
+  }
+
+  @Override
+  public void committed(long windowId)
+  {
+    try {
+      idempotentStorageManager.deleteUpTo(operatorContextId, windowId);
+    }
+    catch (IOException e) {
+      throw new RuntimeException("committing", e);
+    }
+  }
+
   public void setTupleBlast(int i)
   {
     this.tuple_blast = i;
