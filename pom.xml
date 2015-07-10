@@ -30,7 +30,11 @@
     </repository>
   </repositories>
 
-  <properties> 
+  <prerequisites>
+    <maven>3.0.0</maven>
+  </prerequisites>
+
+  <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <netbeans.hint.license>malhar-inc</netbeans.hint.license>
     <maven.deploy.skip>false</maven.deploy.skip>
@@ -48,19 +52,4 @@
     <module>samples</module>
     <module>apps</module>
   </modules>
-
-  <dependencies>
-    <dependency>
-      <groupId>${project.groupId}</groupId>
-      <artifactId>dt-common</artifactId>
-      <version>${dt.framework.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>${project.groupId}</groupId>
-      <artifactId>dt-engine</artifactId>
-      <version>${dt.framework.version}</version>
-      <scope>provided</scope>
-    </dependency>
-  </dependencies>
-
 </project>

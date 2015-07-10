@@ -16,8 +16,9 @@
 package com.datatorrent.contrib.couchbase;
 
 import java.net.URI;
-import java.util.*;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import com.couchbase.client.CouchbaseClient;
@@ -25,18 +26,14 @@ import com.couchbase.client.CouchbaseConnectionFactory;
 import com.couchbase.client.CouchbaseConnectionFactoryBuilder;
 import com.google.common.collect.Lists;
 
-import org.couchbase.mock.Bucket;
 import org.couchbase.mock.Bucket.BucketType;
 import org.couchbase.mock.BucketConfiguration;
 import org.couchbase.mock.CouchbaseMock;
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import static org.junit.Assert.assertEquals;
 
-import com.datatorrent.lib.helper.OperatorContextTestHelper;
 import com.datatorrent.lib.partitioner.StatelessPartitionerTest.PartitioningContextImpl;
 import com.datatorrent.lib.testbench.CollectorTestSink;
 
@@ -49,16 +46,12 @@ import com.datatorrent.netlet.util.DTThrowable;
 public class CouchBaseInputOperatorTest
 {
   private static final Logger logger = LoggerFactory.getLogger(CouchBaseInputOperatorTest.class);
-  private static String APP_ID = "CouchBaseInputOperatorTest";
-  private static String bucket = "default";
-  private static String password = "";
-  private static int OPERATOR_ID = 0;
+  private static final String APP_ID = "CouchBaseInputOperatorTest";
+  private static final String password = "";
   protected static ArrayList<String> keyList;
-  private TestInputOperator inputOperator = null;
   protected static CouchbaseClient client = null;
-  private int numNodes = 2;
-  private int numVBuckets = 8;
-  private int numReplicas = 3;
+  private final int numNodes = 2;
+  private final int numReplicas = 3;
 
   protected CouchbaseConnectionFactory connectionFactory;
 
@@ -77,7 +70,7 @@ public class CouchBaseInputOperatorTest
   }
 
   @Test
-  public void TestCouchBaseInputOperator() throws InterruptedException, Exception
+  public void TestCouchBaseInputOperator() throws Exception
   {
     BucketConfiguration bucketConfiguration = new BucketConfiguration();
     CouchbaseConnectionFactoryBuilder cfb = new CouchbaseConnectionFactoryBuilder();
@@ -106,9 +99,8 @@ public class CouchBaseInputOperatorTest
     // couchbaseBucket.getCouchServers();
     AttributeMap.DefaultAttributeMap attributeMap = new AttributeMap.DefaultAttributeMap();
     attributeMap.put(DAG.APPLICATION_ID, APP_ID);
-    OperatorContextTestHelper.TestIdOperatorContext context = new OperatorContextTestHelper.TestIdOperatorContext(OPERATOR_ID, attributeMap);
 
-    inputOperator = new TestInputOperator();
+    TestInputOperator inputOperator = new TestInputOperator();
     inputOperator.setStore(store);
     inputOperator.insertEventsInTable(10);
 
@@ -147,14 +139,9 @@ public class CouchBaseInputOperatorTest
     for (AbstractCouchBaseInputOperator<String> o: opers){
      o.teardown();
     }
-    if (mockCouchbase1 != null) {
       mockCouchbase1.stop();
-      mockCouchbase1 = null;
-    }
-    if (mockCouchbase2 != null) {
       mockCouchbase2.stop();
-      mockCouchbase2 = null;
-    }
+
   }
 
   public static class TestInputOperator extends AbstractCouchBaseInputOperator<String>
@@ -177,8 +164,8 @@ public class CouchBaseInputOperatorTest
 
     public void insertEventsInTable(int numEvents)
     {
-      String key = null;
-      Integer value = null;
+      String key;
+      Integer value;
       logger.debug("number of events is {}", numEvents);
       for (int i = 0; i < numEvents; i++) {
         key = String.valueOf("Key" + i * 10);
