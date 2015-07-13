@@ -102,13 +102,15 @@ public abstract class AbstractRabbitMQInputOperator<T> implements
   private IdempotentStorageManager idempotentStorageManager;
   protected final transient Map<Long, byte[]> currentWindowRecoveryState;
   private transient final Set<Long> pendingAck;
+  private transient final Set<Long> recoveredTags;
   private transient long currentWindowId;
   private transient int operatorContextId;
   
   public AbstractRabbitMQInputOperator()
   {
     currentWindowRecoveryState = new HashMap<Long, byte[]>();
-    pendingAck = new HashSet<Long>();   
+    pendingAck = new HashSet<Long>();
+    recoveredTags = new HashSet<Long>();
   }
 
   
@@ -148,8 +150,11 @@ public abstract class AbstractRabbitMQInputOperator<T> implements
     public void handleDelivery(String consumer_Tag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException
     {
       long tag = envelope.getDeliveryTag();
-      if(envelope.isRedeliver() && (pendingAck.contains(tag)))
+      if(envelope.isRedeliver() && (recoveredTags.contains(tag) || pendingAck.contains(tag)))
       {
+        if(recoveredTags.contains(tag)) {
+          pendingAck.add(tag);
+        }
         return;
       }
       
@@ -194,7 +199,7 @@ public abstract class AbstractRabbitMQInputOperator<T> implements
         return;
       }
       for (Entry<Long, byte[]>  recoveredEntry : recoveredData.entrySet()) {
-        pendingAck.add(recoveredEntry.getKey());
+        recoveredTags.add(recoveredEntry.getKey());
         emitTuple(recoveredEntry.getValue());
       }
     } catch (IOException e) {
@@ -261,10 +266,12 @@ public abstract class AbstractRabbitMQInputOperator<T> implements
       channel = connection.createChannel();
 
       channel.exchangeDeclare(exchange, exchangeType);
+      boolean resetQueueName = false;
       if (queueName == null){
         // unique queuename is generated
         // used in case of fanout exchange
         queueName = channel.queueDeclare().getQueue();
+        resetQueueName = true;
       } else {
         // user supplied name
         // used in case of direct exchange
@@ -277,6 +284,10 @@ public abstract class AbstractRabbitMQInputOperator<T> implements
 //      channel.basicConsume(queueName, true, consumer);
       tracingConsumer = new TracingConsumer(channel);
       cTag = channel.basicConsume(queueName, false, tracingConsumer);
+      if(resetQueueName)
+      {
+        queueName = null;
+      }
     }
     catch (IOException ex) {
       throw new RuntimeException("Connection Failure", ex);

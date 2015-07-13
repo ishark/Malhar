@@ -25,16 +25,21 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
 
+import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datatorrent.contrib.helper.CollectorModule;
 import com.datatorrent.contrib.helper.MessageQueueTestHelper;
+import com.datatorrent.api.Context.OperatorContext;
+import com.datatorrent.api.Attribute;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
 import com.datatorrent.api.LocalMode;
+import com.datatorrent.lib.helper.OperatorContextTestHelper;
 import com.datatorrent.lib.io.IdempotentStorageManager;
+import com.datatorrent.lib.testbench.CollectorTestSink;
 import com.datatorrent.netlet.util.DTThrowable;
 
 /**
@@ -145,7 +150,7 @@ public class RabbitMQInputOperatorTest
       public void run()
       {
         long startTms = System.currentTimeMillis();
-        long timeout = 10000L;
+        long timeout = 100000L;
         try {
           while (!collector.inputPort.collections.containsKey("collector") && System.currentTimeMillis() - startTms < timeout) {
             Thread.sleep(500);
@@ -181,4 +186,55 @@ public class RabbitMQInputOperatorTest
 
     MessageQueueTestHelper.validateResults(testNum, collector.inputPort.collections);
   }  
+
+  @Test
+  public void testRecoveryAndIdempotency() throws Exception {
+    RabbitMQInputOperator operator = new RabbitMQInputOperator();
+    operator
+        .setIdempotentStorageManager(new IdempotentStorageManager.FSIdempotentStorageManager());
+    operator.setHost("localhost");
+    operator.setExchange("testEx");
+    operator.setExchangeType("fanout");
+
+    Attribute.AttributeMap attributeMap = new Attribute.AttributeMap.DefaultAttributeMap();
+    CollectorTestSink<Object> sink = new CollectorTestSink<Object>();
+
+    operator.outputPort.setSink(sink);
+    OperatorContext context = new OperatorContextTestHelper.TestIdOperatorContext(
+        1, attributeMap);
+
+    operator.setup(context);
+    operator.activate(context);
+
+    final RabbitMQMessageGenerator publisher = new RabbitMQMessageGenerator();
+    publisher.setup();
+    publisher.generateMessages(5);
+
+    Thread.sleep(10000);
+
+    operator.beginWindow(1);
+    operator.emitTuples();
+    operator.endWindow();
+
+    operator.deactivate();
+    Assert.assertEquals("num of messages in window 1", 15, sink.collectedTuples.size());
+    
+    // failure and then re-deployment of operator
+    sink.collectedTuples.clear();
+    operator.setup(context);
+    operator.activate(context);
+
+    Assert.assertEquals("largest recovery window", 1, operator
+        .getIdempotentStorageManager().getLargestRecoveryWindow());
+    operator.beginWindow(1);
+    operator.endWindow();
+    Assert.assertEquals("num of messages in window 1", 15,
+        sink.collectedTuples.size());
+    sink.collectedTuples.clear();
+
+    operator.deactivate();
+    operator.teardown();
+    operator.getIdempotentStorageManager().deleteUpTo(context.getId(), 1);
+    publisher.teardown();
+  }
 }
