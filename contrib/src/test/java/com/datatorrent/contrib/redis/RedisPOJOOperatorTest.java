@@ -102,7 +102,7 @@ public class RedisPOJOOperatorTest {
       outputOperator.beginWindow(101);
 
       KeyValPair<String, Object> keyVal = new KeyValPair<String, Object>(
-          "test_abc", new TestClass(1, "abc"));
+          "test_abc1", new TestClass(1, "abc"));
 
       outputOperator.input.process(keyVal);
 
@@ -112,11 +112,11 @@ public class RedisPOJOOperatorTest {
 
       operatorStore.connect();
 
-      Map<String, String> out = operatorStore.getMap("test_abc");
+      Map<String, String> out = operatorStore.getMap("test_abc1");
       Assert.assertEquals("1", out.get("column1"));
       Assert.assertEquals("abc", out.get("column2"));
     } finally {
-      operatorStore.remove("test_abc");
+      operatorStore.remove("test_abc1");
       operatorStore.disconnect();
     }
   }
@@ -157,9 +157,9 @@ public class RedisPOJOOperatorTest {
     value2.put("Column1", "ghi");
     value2.put("Column2", "3");
     
-    testStore.put("test_abc", value);
-    testStore.put("test_def", value1);
-    testStore.put("test_ghi", value2);
+    testStore.put("test_abc_in", value);
+    testStore.put("test_def_in", value1);
+    testStore.put("test_ghi_in", value2);
     
     try {
       LocalMode lma = LocalMode.newInstance();
@@ -205,13 +205,13 @@ public class RedisPOJOOperatorTest {
 
       lc.run();
 
-      Assert.assertTrue(ObjectCollectorModule.resultMap.containsKey("test_abc"));
+      Assert.assertTrue(ObjectCollectorModule.resultMap.containsKey("test_abc_in"));
       Assert.assertTrue(ObjectCollectorModule.resultMap
-          .containsKey("test_def"));
+          .containsKey("test_def_in"));
       Assert.assertTrue(ObjectCollectorModule.resultMap
-          .containsKey("test_ghi"));
+          .containsKey("test_ghi_in"));
       
-      TestClass a = (TestClass)ObjectCollectorModule.resultMap.get("test_abc");
+      TestClass a = (TestClass)ObjectCollectorModule.resultMap.get("test_abc_in");
       Assert.assertNotNull(a);
       Assert.assertEquals("abc", a.stringValue);
       Assert.assertEquals("1", a.intValue.toString());

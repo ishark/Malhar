@@ -46,56 +46,81 @@ import com.datatorrent.lib.io.IdempotentStorageManager;
 public abstract class AbstractRedisInputOperator<T> extends
     AbstractStoreInputOperator<T, RedisStore> implements CheckpointListener {
   protected transient List<String> keys = new ArrayList<String>();
-  protected transient String scanOffset;
+  protected transient Integer scanOffset;
   protected transient ScanParams scanParameters;
   private transient boolean scanComplete;
-  private transient Integer recoveryOffset, backupOffset;
-  private transient int scanCount;
+  private transient Integer backupOffset;
+  // recoveryOffset contains last offset processed in window
+  private Integer recoveryOffset;
+  private int scanCount;
+  private transient boolean replay;
 
   @NotNull
-  protected IdempotentStorageManager idempotentStorageManager;
+  private IdempotentStorageManager idempotentStorageManager;
 
   private transient OperatorContext context;
   private transient long currentWindowId;
+  private transient Integer sleepTimeMillis;
 
   public AbstractRedisInputOperator() {
     scanCount = 2;
-    idempotentStorageManager = new IdempotentStorageManager.FSIdempotentStorageManager();
+    recoveryOffset = 0;
+    setIdempotentStorageManager(new IdempotentStorageManager.FSIdempotentStorageManager());
   }
 
   @Override
   public void beginWindow(long windowId) {
     currentWindowId = windowId;
-    if (currentWindowId <= idempotentStorageManager.getLargestRecoveryWindow()) {
+    replay = false;
+    if (currentWindowId <= getIdempotentStorageManager()
+        .getLargestRecoveryWindow()) {
       try {
-        Integer recoveredOffset = (Integer) idempotentStorageManager.load(
-            context.getId(), windowId);
-        if (recoveredOffset != null) {
-          scanOffset = recoveredOffset.toString();
+        if (checkIfWindowExistsInIdempotencyManager(windowId - 1)) {
+          // Begin offset for this window is recovery offset stored for the last window
+          Integer recoveredOffset = (Integer) getIdempotentStorageManager()
+              .load(context.getId(), windowId - 1);
+          if (recoveredOffset != null) {
+            scanOffset = recoveredOffset;
+          }
+          replay = true;
         }
       } catch (IOException e) {
         DTThrowable.rethrow(e);
       }
     }
-    
-    recoveryOffset = backupOffset;
-    scanKeysFromOffset();
+  }
+
+  private boolean checkIfWindowExistsInIdempotencyManager(long windowId)
+      throws IOException {
+    long[] windowsIds = getIdempotentStorageManager().getWindowIds(
+        context.getId());
+    for (long id : windowsIds) {
+      if (windowId == id)
+        return true;
+    }
+    return false;
   }
 
   private void scanKeysFromOffset() {
     if (!scanComplete) {
-      ScanResult<String> result = store.ScanKeys(scanOffset, scanParameters);
-      backupOffset = Integer.parseInt(scanOffset);
-      scanOffset = result.getStringCursor();
-      if(scanOffset.equalsIgnoreCase("0"))
-      {
-        scanComplete = true;
+      if (replay && scanOffset > recoveryOffset) {
+        try {
+          Thread.sleep(sleepTimeMillis);
+        } catch (InterruptedException e) {
+          DTThrowable.rethrow(e);
+        }
+        return;
       }
-      if (result.getStringCursor().equals("0")) {
+
+      ScanResult<String> result = store.ScanKeys(scanOffset, scanParameters);
+      backupOffset = scanOffset;
+      scanOffset = Integer.parseInt(result.getStringCursor());
+      if (scanOffset == 0) {
+        scanComplete = true;
+
         // Redis store returns 0 after all data is read,
         // point scanOffset to the end in this case for reading any new tuples
-        Integer endOffset = backupOffset + result.getResult().size();
-        scanOffset = endOffset.toString();
+        scanOffset = backupOffset + result.getResult().size();
       }
 
       keys = result.getResult();
@@ -105,21 +130,34 @@ public abstract class AbstractRedisInputOperator<T> extends
   @Override
   public void setup(OperatorContext context) {
     super.setup(context);
-    idempotentStorageManager.setup(context);
+    sleepTimeMillis = context.getValue(context.SPIN_MILLIS);
+    getIdempotentStorageManager().setup(context);
     this.context = context;
-    scanOffset = "0";
+    scanOffset = 0;
     scanComplete = false;
     scanParameters = new ScanParams();
     scanParameters.count(scanCount);
+    // For the 1st window after checkpoint, windowID - 1 would not have recovery
+    // offset stored in idempotentStorageManager
+    // But recoveryOffset is non-transient, so will be recovered with
+    // checkPointing
+    scanOffset = recoveryOffset;
   }
 
   @Override
   public void endWindow() {
+    while (replay && scanOffset < recoveryOffset) {
+      // If less keys got scanned in this window, scan till recovery offset
+      scanKeysFromOffset();
+      processTuples();
+    }
     super.endWindow();
+    recoveryOffset = scanOffset;
 
-    if (currentWindowId > idempotentStorageManager.getLargestRecoveryWindow()) {
+    if (currentWindowId > getIdempotentStorageManager()
+        .getLargestRecoveryWindow()) {
       try {
-        idempotentStorageManager.save(recoveryOffset, context.getId(),
+        getIdempotentStorageManager().save(recoveryOffset, context.getId(),
             currentWindowId);
       } catch (IOException e) {
         DTThrowable.rethrow(e);
@@ -130,7 +168,7 @@ public abstract class AbstractRedisInputOperator<T> extends
   @Override
   public void teardown() {
     super.teardown();
-    idempotentStorageManager.teardown();
+    getIdempotentStorageManager().teardown();
   }
 
   public int getScanCount() {
@@ -143,25 +181,31 @@ public abstract class AbstractRedisInputOperator<T> extends
 
   @Override
   public void emitTuples() {
-    processTuples();
     scanKeysFromOffset();
+    processTuples();
   }
 
   abstract public void processTuples();
 
   @Override
-  public void checkpointed(long windowId)
-  {
+  public void checkpointed(long windowId) {
   }
 
   @Override
-  public void committed(long windowId)
-  {
+  public void committed(long windowId) {
     try {
-      idempotentStorageManager.deleteUpTo(context.getId(), windowId);
-    }
-    catch (IOException e) {
+      getIdempotentStorageManager().deleteUpTo(context.getId(), windowId);
+    } catch (IOException e) {
       throw new RuntimeException("committing", e);
     }
+  }
+
+  public IdempotentStorageManager getIdempotentStorageManager() {
+    return idempotentStorageManager;
+  }
+
+  public void setIdempotentStorageManager(
+      IdempotentStorageManager idempotentStorageManager) {
+    this.idempotentStorageManager = idempotentStorageManager;
   }
 }

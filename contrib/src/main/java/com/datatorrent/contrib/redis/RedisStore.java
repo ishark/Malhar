@@ -278,9 +278,9 @@ public class RedisStore implements TransactionableKeyValueStore
     }
   }
 
-  public ScanResult<String> ScanKeys(String offset, ScanParams params)
+  public ScanResult<String> ScanKeys(Integer offset, ScanParams params)
   {
-    return jedis.scan(offset, params);
+    return jedis.scan(offset.toString(), params);
   }
 
   /**

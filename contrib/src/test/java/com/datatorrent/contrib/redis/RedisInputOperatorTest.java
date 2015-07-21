@@ -26,10 +26,14 @@ import org.junit.Test;
 import redis.clients.jedis.ScanParams;
 import redis.clients.jedis.ScanResult;
 
+import com.datatorrent.api.Attribute;
+import com.datatorrent.api.Context.OperatorContext;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DefaultInputPort;
 import com.datatorrent.api.LocalMode;
 import com.datatorrent.common.util.BaseOperator;
+import com.datatorrent.lib.helper.OperatorContextTestHelper;
+import com.datatorrent.lib.testbench.CollectorTestSink;
 import com.datatorrent.lib.util.KeyValPair;
 
 public class RedisInputOperatorTest {
@@ -57,14 +61,13 @@ public class RedisInputOperatorTest {
     this.testStore = new RedisStore();
 
     testStore.connect();
-    ScanParams params =  new ScanParams();
+    ScanParams params = new ScanParams();
     params.count(1);
-    
+
     testStore.put("test_abc", "789");
     testStore.put("test_def", "456");
     testStore.put("test_ghi", "123");
-        
-    
+
     try {
       LocalMode lma = LocalMode.newInstance();
       DAG dag = lma.getDAG();
@@ -82,7 +85,7 @@ public class RedisInputOperatorTest {
         @Override
         public void run() {
           long startTms = System.currentTimeMillis();
-          long timeout = 10000L;
+          long timeout = 50000L;
           try {
             Thread.sleep(1000);
             while (System.currentTimeMillis() - startTms < timeout) {
@@ -110,11 +113,78 @@ public class RedisInputOperatorTest {
 
     finally {
       for (KeyValPair<String, String> entry : CollectorModule.resultMap) {
-    	System.out.println("entry is  = " + entry.getKey() + " : " + entry.getValue());
+        System.out.println("entry is  = " + entry.getKey() + " : "
+            + entry.getValue());
         testStore.remove(entry.getKey());
       }
 
       testStore.disconnect();
+    }
+  }
+
+  @Test
+  public void testRecoveryAndIdempotency() throws Exception {
+    this.operatorStore = new RedisStore();
+    this.testStore = new RedisStore();
+
+    testStore.connect();
+    ScanParams params = new ScanParams();
+    params.count(1);
+
+    testStore.put("test_abc", "789");
+    testStore.put("test_def", "456");
+    testStore.put("test_ghi", "123");
+
+    RedisKeyValueInputOperator operator = new RedisKeyValueInputOperator();
+    operator.setStore(operatorStore);
+    operator.setScanCount(2);
+
+    Attribute.AttributeMap attributeMap = new Attribute.AttributeMap.DefaultAttributeMap();
+    CollectorTestSink<Object> sink = new CollectorTestSink<Object>();
+
+    operator.outputPort.setSink(sink);
+    OperatorContext context = new OperatorContextTestHelper.TestIdOperatorContext(
+        1, attributeMap);
+
+    try {
+      operator.setup(context);
+
+      operator.beginWindow(4);
+      operator.emitTuples();
+      operator.endWindow();
+
+      Assert.assertEquals("num of messages in window 1", 2,
+          sink.collectedTuples.size());
+      sink.collectedTuples.clear();
+
+      operator.beginWindow(5);
+      operator.emitTuples();
+      operator.endWindow();
+      sink.collectedTuples.clear();
+
+      // failure and then re-deployment of operator
+      // Re-instantiating to reset values
+      operator = new RedisKeyValueInputOperator();
+      operator.setStore(operatorStore);
+      operator.setScanCount(2);
+      operator.outputPort.setSink(sink);
+      operator.setup(context);
+
+      Assert.assertEquals("largest recovery window", 5, operator
+          .getIdempotentStorageManager().getLargestRecoveryWindow());
+
+      operator.beginWindow(4);
+      operator.emitTuples();
+      // operator.emitTuples();
+      operator.endWindow();
+
+      Assert.assertEquals("num of messages in window 1", 2,
+          sink.collectedTuples.size());
+      sink.collectedTuples.clear();
+    } finally {
+
+      operator.getIdempotentStorageManager().deleteUpTo(context.getId(), 5);
+      operator.teardown();
     }
   }
 }

@@ -15,39 +15,41 @@
  */
 
 package com.datatorrent.contrib.redis;
+
 import java.util.ArrayList;
 import java.util.List;
 import com.datatorrent.lib.util.KeyValPair;
 
 /**
- * This is the an implementation of a Redis input operator for fetching Key-Value pair stored in Redis.
- * It takes in keys to fetch and emits corresponding <Key, Value> Pair. Value data type is String in this case.
- * <p></p>
+ * This is the an implementation of a Redis input operator for fetching
+ * Key-Value pair stored in Redis. It takes in keys to fetch and emits
+ * corresponding <Key, Value> Pair. Value data type is String in this case.
+ * <p>
+ * </p> 
  * @displayName Redis Input Operator for Key Value pair
  * @category Store
  * @tags input operator, key value
  *
  */
-public class RedisKeyValueInputOperator extends AbstractRedisInputOperator<KeyValPair<String, String>> {
+public class RedisKeyValueInputOperator extends
+    AbstractRedisInputOperator<KeyValPair<String, String>> {
 
   private List<Object> keysObjectList = new ArrayList<Object>();
 
   @Override
   public void beginWindow(long windowId) {
-	System.out.println("Calling begin window again.. ");
     super.beginWindow(windowId);
-    keysObjectList = new ArrayList<Object>(keys);
   }
 
-
   @Override
-  public void processTuples()
-  {
+  public void processTuples() {
+    keysObjectList = new ArrayList<Object>(keys);
     if (keysObjectList.size() > 0) {
 
       List<Object> allValues = store.getAll(keysObjectList);
-      for (int i = 0; i < allValues.size(); i++) {    	  
-        outputPort.emit(new KeyValPair<String, String>(keys.get(i), allValues.get(i).toString()));
+      for (int i = 0; i < allValues.size() && i < keys.size(); i++) {
+        outputPort.emit(new KeyValPair<String, String>(keys.get(i), allValues
+            .get(i).toString()));
       }
       keys.clear();
       keysObjectList.clear();
