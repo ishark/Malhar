@@ -17,9 +17,11 @@ package com.datatorrent.demos.pi;
 
 import org.apache.hadoop.conf.Configuration;
 
+import com.datatorrent.lib.codec.JavaSerializationStreamCodec;
 import com.datatorrent.lib.io.ConsoleOutputOperator;
 import com.datatorrent.lib.testbench.RandomEventGenerator;
-
+import com.datatorrent.lib.util.BaseKeyValueOperator.DefaultPartitionCodec;
+import com.datatorrent.api.Context.PortContext;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
 import com.datatorrent.api.StreamingApplication;
@@ -80,11 +82,15 @@ public class Application implements StreamingApplication
   @Override
   public void populateDAG(DAG dag, Configuration conf)
   {
+    dag.setAttribute(DAG.LOGGER_OPERATOR_PREFIX, "LOGGER");
     RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
     PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
     ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
-    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);
-    dag.addStream("rand_console",calc.output, console.input).setLocality(locality);
+    ConsoleOutputOperator console1 =  new ConsoleOutputOperator();
+    console1.setStringFormat("Logger :  %.16f");
+    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);    
+    dag.addStream("rand_console",calc.output, console.input).setLocality(locality).persistStream(console1);
+    JavaSerializationStreamCodec<Double> codec = new JavaSerializationStreamCodec<Double>();
+    dag.setInputPortAttribute(console.input, PortContext.STREAM_CODEC, codec);
   }
-
 }
