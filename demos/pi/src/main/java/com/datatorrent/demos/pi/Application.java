@@ -15,15 +15,29 @@
  */
 package com.datatorrent.demos.pi;
 
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+
 import org.apache.hadoop.conf.Configuration;
 
-import com.datatorrent.lib.io.ConsoleOutputOperator;
-import com.datatorrent.lib.testbench.RandomEventGenerator;
-
+import com.datatorrent.api.Context.OperatorContext;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
+import com.datatorrent.api.DAG.StreamMeta;
+import com.datatorrent.api.DefaultInputPort;
+import com.datatorrent.api.DefaultOutputPort;
+import com.datatorrent.api.DefaultPartition;
+import com.datatorrent.api.InputOperator;
+import com.datatorrent.api.Partitioner;
+import com.datatorrent.api.StreamCodec;
 import com.datatorrent.api.StreamingApplication;
 import com.datatorrent.api.annotation.ApplicationAnnotation;
+import com.datatorrent.common.codec.JsonStreamCodec;
+import com.datatorrent.common.util.BaseOperator;
+import com.datatorrent.lib.io.ConsoleOutputOperator;
+import com.google.common.collect.Sets;
 
 /**
  * Monte Carlo PI estimation demo : <br>
@@ -75,16 +89,141 @@ import com.datatorrent.api.annotation.ApplicationAnnotation;
 @ApplicationAnnotation(name="PiDemo")
 public class Application implements StreamingApplication
 {
+  public static class AscendingNumbersOperator implements InputOperator {
+
+    private Integer count = 0;
+
+    @Override
+    public void emitTuples() {
+
+      outputPort.emit(count++);
+    }
+
+    public final transient DefaultOutputPort<Integer> outputPort = new DefaultOutputPort<>();
+
+    @Override
+    public void beginWindow(long windowId) {
+    }
+
+    @Override
+    public void endWindow() {
+    }
+
+    @Override
+    public void setup(OperatorContext context) {
+    }
+
+    @Override
+    public void teardown() {
+    }
+
+  };
+
+  public static class DivisibleByStreamCodec extends JsonStreamCodec<Object> implements Serializable {
+
+    protected int number = 1;
+
+    public DivisibleByStreamCodec(int number) {
+      this.number = number;
+    }
+
+    @Override
+    public int getPartition(Object o) {
+      if ((Integer) o % number == 0) {
+        return 1;
+      }
+      return 2;
+    }
+
+  }
+
+  public static class PassThruOperatorWithCodec extends BaseOperator implements Partitioner<PassThruOperatorWithCodec> {
+
+    private int divisibleBy = 1;
+
+    public PassThruOperatorWithCodec() {
+    }
+
+    public PassThruOperatorWithCodec(int divisibleBy) {
+      this.divisibleBy = divisibleBy;
+    }
+
+    public final transient DefaultInputPort<Object> input = new DefaultInputPort<Object>() {
+      @Override
+      public void process(Object tuple) {
+        output.emit(tuple);
+      }
+
+      @Override
+      public StreamCodec<Object> getStreamCodec() {
+        return new DivisibleByStreamCodec(divisibleBy);
+      }
+    };
+
+    public final transient DefaultOutputPort<Object> output = new DefaultOutputPort<Object>();
+
+    @Override
+    public Collection definePartitions(Collection partitions, PartitioningContext context) {
+      Collection<Partition> newPartitions = new ArrayList<Partition>();
+
+      // Mostly for 1 partition we dont need to do this
+      int partitionBits = (Integer.numberOfLeadingZeros(0) - Integer.numberOfLeadingZeros(1));
+      int partitionMask = 0;
+      if (partitionBits > 0) {
+        partitionMask = -1 >>> (Integer.numberOfLeadingZeros(-1)) - partitionBits;
+      }
+
+      partitionMask = 1;
+
+      if (partitions.size() == 1) {
+        // No partitioning done so far..
+        // Single partition again, but with only even numbers ok?
+        PassThruOperatorWithCodec newInstance = new PassThruOperatorWithCodec();
+        Partition partition = new DefaultPartition<PassThruOperatorWithCodec>(newInstance);
+
+        // Consider partitions are 1 & 2 and we are sending only 1 partition
+        // Partition 1 = even numbers
+        // Partition 2 = odd numbers
+        PartitionKeys value = new PartitionKeys(partitionMask, Sets.newHashSet(1));
+        partition.getPartitionKeys().put(input, value);
+        newPartitions.add(partition);
+      }
+
+      return newPartitions;
+    }
+
+    @Override
+    public void partitioned(Map partitions) {
+      // TODO Auto-generated method stub
+
+    }
+  }
+  
   private final Locality locality = null;
 
   @Override
   public void populateDAG(DAG dag, Configuration conf)
   {
-    RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
-    PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
-    ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
-    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);
-    dag.addStream("rand_console",calc.output, console.input).setLocality(locality);
+//    RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
+//    PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
+//    ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
+//    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);
+//    dag.addStream("rand_console",calc.output, console.input).setLocality(locality);
+    
+    AscendingNumbersOperator ascend = dag.addOperator("ascend", new AscendingNumbersOperator());
+    PassThruOperatorWithCodec passThru1 = dag.addOperator("Multiples_of_2", new PassThruOperatorWithCodec(2));
+    PassThruOperatorWithCodec passThru2 = dag.addOperator("Multiples_of_3", new PassThruOperatorWithCodec(3));
+
+    final ConsoleOutputOperator console = dag.addOperator("console_2", new ConsoleOutputOperator());
+    final ConsoleOutputOperator console1 = dag.addOperator("console_3", new ConsoleOutputOperator());
+
+    ConsoleOutputOperator logger = new ConsoleOutputOperator();
+    StreamMeta s = dag.addStream("Stream1", ascend.outputPort, passThru1.input, passThru2.input);
+    s.persistUsing("persister", logger, logger.input);
+
+    dag.addStream("Stream2", passThru1.output, console.input);
+    dag.addStream("Stream3", passThru2.output, console1.input);
+
   }
 
 }
