@@ -21,9 +21,16 @@ import com.datatorrent.lib.codec.JavaSerializationStreamCodec;
 import com.datatorrent.lib.io.ConsoleOutputOperator;
 import com.datatorrent.lib.testbench.RandomEventGenerator;
 import com.datatorrent.lib.util.BaseKeyValueOperator.DefaultPartitionCodec;
+import com.datatorrent.stram.plan.StreamPersistanceTests;
+import com.datatorrent.stram.plan.StreamPersistanceTests.AscendingNumbersOperator;
+import com.datatorrent.stram.plan.StreamPersistanceTests.PassThruOperatorWithCodec;
+import com.datatorrent.stram.plan.StreamPersistanceTests.TestPersistanceOperator;
+import com.datatorrent.stram.plan.StreamPersistanceTests.TestRecieverOperator;
+import com.datatorrent.stram.plan.logical.LogicalPlan;
 import com.datatorrent.api.Context.PortContext;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
+import com.datatorrent.api.DAG.StreamMeta;
 import com.datatorrent.api.StreamingApplication;
 import com.datatorrent.api.annotation.ApplicationAnnotation;
 
@@ -82,15 +89,40 @@ public class Application implements StreamingApplication
   @Override
   public void populateDAG(DAG dag, Configuration conf)
   {
-    dag.setAttribute(DAG.LOGGER_OPERATOR_PREFIX, "LOGGER");
-    RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
+    /*RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
     PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
     ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
     ConsoleOutputOperator console1 =  new ConsoleOutputOperator();
     console1.setStringFormat("Logger :  %.16f");
     dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);    
-    dag.addStream("rand_console",calc.output, console.input).setLocality(locality).persistStream(console1);
+    StreamMeta s = dag.addStream("rand_console",calc.output, console.input).setLocality(locality).persist(console1);
     JavaSerializationStreamCodec<Double> codec = new JavaSerializationStreamCodec<Double>();
-    dag.setInputPortAttribute(console.input, PortContext.STREAM_CODEC, codec);
+    dag.setInputPortAttribute(console.input, PortContext.STREAM_CODEC, codec);*/
+    
+//    StreamPersistanceTests.AscendingNumbersOperator ascend = dag.addOperator("ascend", new StreamPersistanceTests.AscendingNumbersOperator());
+//    PassThruOperatorWithCodec passThru = dag.addOperator("PassThrough", new PassThruOperatorWithCodec());
+//    ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
+//    ConsoleLoggerOperator console1 =  new ConsoleLoggerOperator();
+//    //dag.addOperator("console1", console1);
+//    //StreamMeta s  = dag.addStream("Stream1", ascend.outputPort, passThru.input, console1.input);
+//    StreamMeta s  = dag.addStream("Stream1", ascend.outputPort, passThru.input);
+//    s.persist(console1, console1.input);
+//    dag.addStream("Stream2", passThru.output, console.input);
+    
+    //ConsoleOutputOperator console1 =  new ConsoleOutputOperator();
+    
+    AscendingNumbersOperator ascend = dag.addOperator("ascend", new AscendingNumbersOperator());
+    PassThruOperatorWithCodec passThru1 = dag.addOperator("PassThrough1", new PassThruOperatorWithCodec(2));
+    PassThruOperatorWithCodec passThru2 = dag.addOperator("PassThrough2", new PassThruOperatorWithCodec(3));
+
+    final ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
+    final ConsoleOutputOperator console1 = dag.addOperator("console1", new ConsoleOutputOperator());
+
+    ConsoleOutputOperator logger = new ConsoleOutputOperator();
+    StreamMeta s = dag.addStream("Stream1", ascend.outputPort, passThru1.input, passThru2.input);
+    s.persist(logger, logger.input);
+
+    dag.addStream("Stream2", passThru1.output, console.input);
+    dag.addStream("Stream3", passThru2.output, console1.input);
   }
 }
