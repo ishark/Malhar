@@ -21,15 +21,17 @@ import java.sql.SQLException;
 import javax.annotation.Nonnull;
 
 import org.apache.hadoop.conf.Configuration;
+
 import twitter4j.Status;
 
 import com.datatorrent.api.DAG;
+import com.datatorrent.api.DAG.StreamMeta;
 import com.datatorrent.api.DAG.Locality;
 import com.datatorrent.api.StreamingApplication;
 import com.datatorrent.api.annotation.ApplicationAnnotation;
-
 import com.datatorrent.contrib.twitter.TwitterSampleInput;
 import com.datatorrent.lib.db.jdbc.AbstractJdbcTransactionableOutputOperator;
+import com.datatorrent.lib.stream.DevNull;
 
 /**
  * An application which connects to Twitter Sample Input and stores all the
@@ -102,13 +104,14 @@ public class TwitterDumpApplication implements StreamingApplication
     TwitterSampleInput twitterStream = dag.addOperator("TweetSampler", new TwitterSampleInput());
 
     //ConsoleOutputOperator dbWriter = dag.addOperator("DatabaseWriter", new ConsoleOutputOperator());
-
-    Status2Database dbWriter = dag.addOperator("DatabaseWriter", new Status2Database());
+    DevNull devNull = dag.addOperator("devNull", new DevNull());
+    Status2Database dbWriter = new Status2Database();
     dbWriter.getStore().setDatabaseDriver("com.mysql.jdbc.Driver");
-    dbWriter.getStore().setDatabaseUrl("jdbc:mysql://node6.morado.com:3306/twitter");
+    dbWriter.getStore().setDatabaseUrl("jdbc:mysql://node17.morado.com:5055/twitter");
     dbWriter.getStore().setConnectionProperties("user:twitter");
 
-    dag.addStream("Statuses", twitterStream.status, dbWriter.input).setLocality(Locality.CONTAINER_LOCAL);
+    StreamMeta stream = dag.addStream("Statuses", twitterStream.status, devNull.data).setLocality(Locality.CONTAINER_LOCAL);
+    stream.persistUsing("dbWriter", dbWriter, dbWriter.input);
   }
 
 }
