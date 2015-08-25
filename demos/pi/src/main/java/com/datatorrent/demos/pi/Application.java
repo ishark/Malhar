@@ -80,11 +80,18 @@ public class Application implements StreamingApplication
   @Override
   public void populateDAG(DAG dag, Configuration conf)
   {
+//    RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
+//    PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
+//    ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
+//    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);
+//    dag.addStream("rand_console",calc.output, console.input).setLocality(locality);
+    
     RandomEventGenerator rand = dag.addOperator("rand", new RandomEventGenerator());
-    PiCalculateOperator calc = dag.addOperator("picalc", new PiCalculateOperator());
+    TempTestOperator test = dag.addOperator("test", new TempTestOperator());
     ConsoleOutputOperator console = dag.addOperator("console", new ConsoleOutputOperator());
-    dag.addStream("rand_calc", rand.integer_data, calc.input).setLocality(locality);
-    dag.addStream("rand_console",calc.output, console.input).setLocality(locality);
+    
+    dag.addStream("temp_data", rand.string_data, test.inputPort).setLocality(locality);
+    dag.addStream("consoleOut",test.output, console.input).setLocality(locality);
   }
 
 }
