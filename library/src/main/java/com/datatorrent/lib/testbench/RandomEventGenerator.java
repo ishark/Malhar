@@ -72,7 +72,7 @@ public class RandomEventGenerator extends BaseOperator implements InputOperator
   @Min(1)
   private int tuplesBlast = 1000;
   @Min(1)
-  private int tuplesBlastIntervalMillis = 10;
+  private int tuplesBlastIntervalMillis = 1000;
   private int min_value = 0;
   private int max_value = 100;
   private final Random random = new Random();

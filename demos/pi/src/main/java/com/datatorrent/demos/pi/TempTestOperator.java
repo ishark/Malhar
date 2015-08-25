@@ -17,7 +17,13 @@ public class TempTestOperator extends BaseOperator
   @Override
   public void setup(OperatorContext context) 
   {
-    transientProperty = new Trial("restarted " + Integer.toString(restartTimes));
+    try {
+      Thread.sleep(100000);
+    } catch (InterruptedException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
+    transientProperty = new Trial("restarted " + Integer.toString(restartTimes++));
   }
   
   public final transient DefaultInputPort<String> inputPort = new DefaultInputPort<String>()
