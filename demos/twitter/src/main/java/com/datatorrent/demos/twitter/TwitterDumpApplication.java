@@ -15,6 +15,7 @@
  */
 package com.datatorrent.demos.twitter;
 
+import java.lang.reflect.Method;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
@@ -26,11 +27,13 @@ import twitter4j.Status;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.DAG.Locality;
 import com.datatorrent.api.DAG.StreamMeta;
+import com.datatorrent.api.Operator;
 import com.datatorrent.api.StreamingApplication;
 import com.datatorrent.api.annotation.ApplicationAnnotation;
 import com.datatorrent.contrib.twitter.TwitterSampleInput;
 import com.datatorrent.lib.db.jdbc.AbstractJdbcTransactionableOutputOperator;
 import com.datatorrent.lib.stream.DevNull;
+import com.datatorrent.netlet.util.DTThrowable;
 
 /**
  * An application which connects to Twitter Sample Input and stores all the
@@ -98,20 +101,45 @@ public class TwitterDumpApplication implements StreamingApplication
   @Override
   public void populateDAG(DAG dag, Configuration conf)
   {
-    //dag.setAttribute(DAGContext.APPLICATION_NAME, "TweetsDump");
+    // dag.setAttribute(DAGContext.APPLICATION_NAME, "TweetsDump");
 
     TwitterSampleInput twitterStream = dag.addOperator("TweetSampler", new TwitterSampleInput());
 
-    DevNull<Status> devNull = dag.addOperator("devNull", new DevNull<Status>());
-    Status2Database dbWriter =  new Status2Database();
+    Status2Database dbWriter = new Status2Database();
     dbWriter.getStore().setDatabaseDriver("com.mysql.jdbc.Driver");
     dbWriter.getStore().setDatabaseUrl("jdbc:mysql://node17.morado.com:5505/twitter");
     dbWriter.getStore().setConnectionProperties("user:root");
     dbWriter.getStore().setConnectionProperties("password:password");
 
-    StreamMeta s = dag.addStream("Statuses", twitterStream.status, devNull.data).setLocality(Locality.CONTAINER_LOCAL);
-    s.persistUsing("dbPersister", dbWriter, dbWriter.input);
+    if (checkIfPersistMethodExistsInStreamMeta()) {
+      DevNull<Status> devNull = dag.addOperator("devNull", new DevNull<Status>());
+      StreamMeta s = dag.addStream("Statuses", twitterStream.status, devNull.data).setLocality(Locality.CONTAINER_LOCAL);
 
+      // Invoking this using reflection: (As persis API may not be part of dt
+      // version included)
+      // s.persistUsing("dbPersister", dbWriter, dbWriter.input);
+      try {
+        Method method = s.getClass().getMethod("persistUsing", String.class, Operator.class, Operator.InputPort.class);
+        method.invoke(s, "dbPersister", dbWriter, dbWriter.input);
+      } catch (Exception e) {
+        DTThrowable.wrapIfChecked(e);
+      }
+    } else {
+      dag.addOperator("DatabaseWriter", dbWriter);
+      dag.addStream("Statuses", twitterStream.status, dbWriter.input).setLocality(Locality.CONTAINER_LOCAL);
+    }
   }
 
+  public boolean checkIfPersistMethodExistsInStreamMeta()
+  {
+    Method[] methods = StreamMeta.class.getMethods();
+
+    for (Method method : methods) {
+      if (method.getName().equals("persistUsing")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 }
